@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "demo:report": "node -r @swc-node/register src/reports/demo-attention-report.ts",
     "build": "tsc",
     "start": "node dist/main.js",
     "dev": "nodemon",

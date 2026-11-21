@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "demo:report": "pnpm --filter @quickstart-template/api demo:report",
     "dev:api": "pnpm --filter @quickstart-template/api dev",
     "test": "pnpm -r test",
     "build": "pnpm -r build",

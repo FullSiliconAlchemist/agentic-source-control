@@ -1,0 +1,47 @@
+{
+  "baseSha": "344d6dc42c8057fbf5573326b52dbc8a43635e7e",
+  "changedFiles": 5,
+  "description": "## Description\n\nFixes #20303.\n\n`parseSelector` strips quoted strings before checking whether a selector contains a `//` or `/*` comment, so that something like `a[href^=\"//\"]` isn't treated as a comment. The pattern `\"[^\"]+\"|'[^']+'` needs at least one character inside the quotes, so an empty `\"\"` or `''` wasn't matched as a string. Its closing quote then paired with the opening quote of the next string, and everything in between was removed, including the `//` comment. Since no comment was detected, the selector got parsed and the next selector ended up inside the comment:\n\n```scss\n// Input\na[href=\"\"], // comment\nfoo a[href=\"\"] {\n  color: red;\n}\n\n// Output\na[href=\"\"],\n// comment foo a[href=\"\"] {\n  color: red;\n}\n```\n\nThe fix lets the pattern match empty strings (`[^\"]*` / `[^']*`), so the selector is printed as-is, the same way `a[href], // comment` already is. The single-quote form `a[href='']` was broken too, and Less goes through the same code path, so it's fixed as well.\n\nThis came in with #17938.\n\n## Checklist\n\n- [x] I’ve added tests to confirm my change works.\n- [ ] (If changing the API or CLI) I’ve documented the changes I’ve made (in the `docs/` directory).\n- [x] (If the change is user-facing) I’ve added my changes to `changelog_unreleased/*/XXXX.md` file following `changelog_unreleased/TEMPLATE.md`.\n- [x] I’ve read the [contributing guidelines](https://github.com/prettier/prettier/blob/main/CONTRIBUTING.md).\n- [ ] I did _not_ use AI to generate this PR.\n- [x] (If the above is not checked) I have reviewed the AI-generated content before submitting.\n",
+  "headSha": "26ade49bb8524b35781189831c3fd5d5895b7125",
+  "title": "Fix `//` comment swallowed in selector lists with empty attribute values",
+  "url": "https://github.com/prettier/prettier/pull/20305",
+  "repository": "prettier/prettier",
+  "number": 20305,
+  "files": [
+    {
+      "additions": 24,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,24 @@\n+#### Fix `//` comment being swallowed in selector lists with empty attribute values (#20305 by @fixfon)\n+\n+<!-- prettier-ignore -->\n+```scss\n+// Input\n+a[href=\"\"], // comment\n+foo a[href=\"\"] {\n+  color: red;\n+}\n+\n+// Prettier stable\n+a[href=\"\"],\n+// comment foo a[href=\"\"] {\n+  color: red;\n+}\n+\n+// Prettier main\n+a[href=\"\"], // comment\n+foo a[href=\"\"] {\n+  color: red;\n+}\n+```\n+\n+_The same fix applies to Less._",
+      "path": "changelog_unreleased/scss/20305.md",
+      "status": "added"
+    },
+    {
+      "additions": 2,
+      "deletions": 1,
+      "patch": "@@ -1,12 +1,13 @@\n import PostcssSelectorParser from \"postcss-selector-parser/dist/processor.js\";\n+import { removeQuotedStrings } from \"../print/misc.js\";\n import { addTypePrefix } from \"./utilities.js\";\n \n function parseSelector(selector) {\n   // If there's a comment inside of a selector, the parser tries to parse\n   // the content of the comment as selectors which turns it into complete\n   // garbage. Better to print the whole selector as-is and not try to parse\n   // and reformat it.\n-  if (/\\/[/*]/.test(selector.replaceAll(/\"[^\"]+\"|'[^']+'/g, \"\"))) {\n+  if (/\\/[/*]/.test(removeQuotedStrings(selector))) {\n     return {\n       type: \"selector-unknown\",\n       value: selector.trim(),",
+      "path": "src/language-css/parse/parse-selector.js",
+      "status": "modified"
+    },
+    {
+      "additions": 5,
+      "deletions": 0,
+      "patch": "@@ -25,6 +25,10 @@ function adjustStrings(value, options) {\n   return value.replaceAll(STRING_REGEX, (match) => printString(match, options));\n }\n \n+function removeQuotedStrings(value) {\n+  return value.replaceAll(STRING_REGEX, \"\");\n+}\n+\n function quoteAttributeValue(value, options) {\n   const quote = options.singleQuote ? \"'\" : '\"';\n \n@@ -86,5 +90,6 @@ export {\n   printCssNumber,\n   printUnit,\n   quoteAttributeValue,\n+  removeQuotedStrings,\n   shouldPrintTrailingComma,\n };",
+      "path": "src/language-css/print/misc.js",
+      "status": "modified"
+    },
+    {
+      "additions": 29,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,29 @@\n+a[href=\"\"], // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a[href=''], // comment\n+foo a[href=''] {\n+    color: red;\n+}\n+\n+a[href], // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a, // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a[title=\"foo\\\"bar\"], // comment\n+foo a[title=\"foo\\\"bar\"] {\n+    color: red;\n+}\n+\n+a[title='foo\\'bar'], // comment\n+foo a[title='foo\\'bar'] {\n+    color: red;\n+}",
+      "path": "tests/format/scss/comments/20303.scss",
+      "status": "added"
+    },
+    {
+      "additions": 69,
+      "deletions": 0,
+      "patch": "@@ -212,6 +212,75 @@ $blah: (\n ================================================================================\n `;\n \n+exports[`20303.scss format 1`] = `\n+====================================options=====================================\n+parsers: [\"scss\"]\n+                                                      printWidth: 80 (default) |\n+=====================================input======================================\n+a[href=\"\"], // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a[href=''], // comment\n+foo a[href=''] {\n+    color: red;\n+}\n+\n+a[href], // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a, // comment\n+foo a[href=\"\"] {\n+    color: red;\n+}\n+\n+a[title=\"foo\\\\\"bar\"], // comment\n+foo a[title=\"foo\\\\\"bar\"] {\n+    color: red;\n+}\n+\n+a[title='foo\\\\'bar'], // comment\n+foo a[title='foo\\\\'bar'] {\n+    color: red;\n+}\n+\n+=====================================output=====================================\n+a[href=\"\"], // comment\n+foo a[href=\"\"] {\n+  color: red;\n+}\n+\n+a[href=''], // comment\n+foo a[href=''] {\n+  color: red;\n+}\n+\n+a[href], // comment\n+foo a[href=\"\"] {\n+  color: red;\n+}\n+\n+a, // comment\n+foo a[href=\"\"] {\n+  color: red;\n+}\n+\n+a[title=\"foo\\\\\"bar\"], // comment\n+foo a[title=\"foo\\\\\"bar\"] {\n+  color: red;\n+}\n+\n+a[title='foo\\\\'bar'], // comment\n+foo a[title='foo\\\\'bar'] {\n+  color: red;\n+}\n+\n+================================================================================\n+`;\n+\n exports[`CRLF.scss format 1`] = `\n ====================================options=====================================\n parsers: [\"scss\"]",
+      "path": "tests/format/scss/comments/__snapshots__/format.test.js.snap",
+      "status": "modified"
+    }
+  ]
+}
