@@ -5,3 +5,6 @@ allowBuilds:
   '@swc/core': true
   esbuild: true
   protobufjs: true
+permissions:
+  dotenv:
+    skills: false

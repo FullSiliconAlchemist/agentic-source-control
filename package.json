@@ -9,7 +9,7 @@
     "build:api": "pnpm --filter @quickstart-template/api build"
   },
   "engines": {
-    "node": ">=24.15.0",
+    "node": ">=24.22.3",
     "pnpm": ">=10"
   }
 }
