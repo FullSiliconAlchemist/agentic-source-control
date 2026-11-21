@@ -76,4 +76,16 @@ describe('analyzePullRequest', () => {
       ...fixtureFinding, file, location: { source: 'head', start: 10, end: 10 },
     }), evidence)).not.toThrow()
   })
+
+  it('accepts a routine entry for a known file even if its unused line range is inaccurate', async () => {
+    const evidence = await buildCodeEvidence(snapshot, noContext)
+    const file = 'tests/format/scss/comments/__snapshots__/format.test.js.snap'
+    const report = await analyzePullRequest(evidence, {
+      generateJson: async () => json({
+        ...fixtureFinding, file, level: 'low', reviewerQuestion: '',
+        location: { source: 'head', start: 1, end: 999 },
+      }),
+    })
+    expect(report.routineChanges).toEqual([`${file} — ${fixtureFinding.summary}`])
+  })
 })

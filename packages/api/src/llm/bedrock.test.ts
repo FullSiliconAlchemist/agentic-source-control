@@ -12,12 +12,15 @@ describe('Bedrock model', () => {
     })
 
     const model = createBedrockModel('amazon.nova-lite-v1:0', 'us-east-1')
-    await expect(model.generateJson('Produce JSON.', { files: [] }, { type: 'object' })).resolves.toBe('{"findings":[]}')
+    const schema = { type: 'object', properties: {}, required: [], additionalProperties: false }
+    await expect(model.generateJson('Produce JSON.', { files: [] }, schema)).resolves.toBe('{"findings":[]}')
     expect(send).toHaveBeenCalledTimes(1)
     const command = send.mock.calls[0][0]
     expect(command).toBeInstanceOf(ConverseCommand)
     expect(command.input).toMatchObject({
       modelId: 'amazon.nova-lite-v1:0',
+      inferenceConfig: { maxTokens: 10_000, temperature: 0 },
+      additionalModelRequestFields: { inferenceConfig: { topK: 1 } },
       system: [{ text: expect.stringContaining('Produce JSON.') }],
       toolConfig: { toolChoice: { tool: { name: 'submit_attention_report' } } },
       messages: [{ role: 'user', content: [{ text: '{"files":[]}' }] }],

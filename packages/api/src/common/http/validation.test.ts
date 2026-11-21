@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { createValidationPipe, validationPipeOptions } from './validation'
 
 class ExampleDto {
-  @IsString()
   name!: string
 }
+IsString()(ExampleDto.prototype, 'name')
 
 const bodyMetadata: ArgumentMetadata = {
   type: 'body',

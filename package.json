@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "acceptance:report": "pnpm --filter @quickstart-template/api acceptance:report",
     "analyze-pr": "pnpm --filter @quickstart-template/api analyze-pr",
     "fetch-pr": "pnpm --filter @quickstart-template/api fetch-pr",
     "demo:report": "pnpm --filter @quickstart-template/api demo:report",

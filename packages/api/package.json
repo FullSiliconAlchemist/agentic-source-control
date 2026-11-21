@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "acceptance:report": "node -r @swc-node/register src/analysis/acceptance-report.ts",
     "analyze-pr": "node -r @swc-node/register src/analysis/analyze-pr.ts",
     "fetch-pr": "node -r @swc-node/register src/github/fetch-pr.ts",
     "demo:report": "node -r @swc-node/register src/reports/demo-attention-report.ts",

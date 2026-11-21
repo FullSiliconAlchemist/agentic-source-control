@@ -93,7 +93,30 @@ function validFinding(value: unknown): value is ModelFinding {
   return hasKeys(value, ['file', 'level', 'location', 'summary', 'reason', 'reviewerQuestion', 'potentiallyUnrelated']) &&
     text(value.file, 4096) && levels.some((level) => level === value.level) &&
     validLocation(value.location) && text(value.summary, 300) && text(value.reason, 600) &&
-    text(value.reviewerQuestion, 300) && typeof value.potentiallyUnrelated === 'boolean'
+    typeof value.potentiallyUnrelated === 'boolean' &&
+    (text(value.reviewerQuestion, 300) ||
+      (value.level === 'low' && !value.potentiallyUnrelated && value.reviewerQuestion === ''))
+}
+
+export function numberedPatch(file: EvidenceFile) {
+  if (!file.patch) return []
+
+  const lines = file.patch.split('\n')
+  if (file.patchStatus === 'truncated') lines.pop()
+  let old = 0
+  let head = 0
+  return lines.map((text) => {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text)
+    if (hunk) {
+      old = Number(hunk[1])
+      head = Number(hunk[2])
+    }
+    return {
+      oldLine: old && (text.startsWith(' ') || text.startsWith('-')) ? old++ : null,
+      headLine: head && (text.startsWith(' ') || text.startsWith('+')) ? head++ : null,
+      text,
+    }
+  })
 }
 
 function matchesSource(file: EvidenceFile, location: Location): boolean {
@@ -106,20 +129,9 @@ function matchesSource(file: EvidenceFile, location: Location): boolean {
   }
   if (source === 'base' || !file.patch) return false
 
-  const patchLines = file.patch.split('\n')
-  // A truncated patch may end mid-line. Only use its complete lines.
-  if (file.patchStatus === 'truncated') patchLines.pop()
-  const lines = new Set<number>()
-  let current = 0
-  for (const entry of patchLines) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(entry)
-    if (hunk) {
-      current = Number(hunk[source === 'head' ? 2 : 1])
-      continue
-    }
-    if (!current) continue
-    if (entry.startsWith(' ') || entry.startsWith(source === 'head' ? '+' : '-')) lines.add(current++)
-  }
+  const lines = new Set(numberedPatch(file)
+    .map(({ oldLine, headLine }) => source === 'head' ? headLine : oldLine)
+    .filter((number) => number !== null))
 
   if (end - start >= lines.size) return false
   for (let number = start; number <= end; number++) {
@@ -144,8 +156,10 @@ export function parseModelAnalysis(raw: string, evidence: CodeEvidence): ModelAn
   const files = new Map(evidence.files.map((file) => [file.path, file]))
   for (const finding of value.findings) {
     const file = files.get(finding.file)
-    if (!file || (finding.location && !matchesSource(file, finding.location))) {
-      throw new Error('The model cited a file or line range outside the supplied code evidence.')
+    const location = finding.level === 'low' && !finding.potentiallyUnrelated ? null : finding.location
+    if (!file || (location && !matchesSource(file, location))) {
+      const citation = location ? ` ${location.source}:${location.start}-${location.end}` : ''
+      throw new Error(`The model cited a file or line range outside the supplied code evidence: ${JSON.stringify(finding.file)}${citation}.`)
     }
     if (finding.level === 'high' && !file.patch && !file.context.some(({ text }) => text)) {
       throw new Error('The model reported a high-attention finding without code evidence.')

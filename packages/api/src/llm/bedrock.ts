@@ -6,6 +6,7 @@ const REPORT_TOOL = 'submit_attention_report'
 export function createBedrockModel(modelId: string | undefined, region?: string): JsonModel {
   if (!modelId?.trim()) throw new Error('Set BEDROCK_MODEL_ID to analyze a pull request with Bedrock.')
 
+  const isNovaV1 = /amazon\.nova-(?:lite|micro|pro|premier)-v1:/.test(modelId)
   // The SDK resolves credentials through AWS_PROFILE or its standard credential chain.
   const client = new BedrockRuntimeClient({ region, maxAttempts: 1 })
 
@@ -15,14 +16,19 @@ export function createBedrockModel(modelId: string | undefined, region?: string)
         modelId,
         system: [{ text: `${instructions}\nReturn the report as arguments to ${REPORT_TOOL}.` }],
         messages: [{ role: 'user', content: [{ text: JSON.stringify(evidence) }] }],
-        inferenceConfig: { maxTokens: 6_000, temperature: 0 },
+        inferenceConfig: { maxTokens: isNovaV1 ? 10_000 : 6_000, temperature: 0 },
+        ...(isNovaV1 ? { additionalModelRequestFields: { inferenceConfig: { topK: 1 } } } : {}),
         toolConfig: {
           toolChoice: { tool: { name: REPORT_TOOL } },
           tools: [{
             toolSpec: {
               name: REPORT_TOOL,
               description: 'Return the completed Attention Report.',
-              inputSchema: { json: schema },
+              inputSchema: { json: isNovaV1 ? {
+                type: schema.type,
+                properties: schema.properties,
+                required: schema.required,
+              } : schema },
             },
           }],
         },
