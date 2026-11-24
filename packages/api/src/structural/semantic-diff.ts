@@ -1,0 +1,179 @@
+import ts from 'typescript'
+import { parseSymbols } from './symbols'
+
+type Operation = 'CALL' | 'CONDITION' | 'BRANCH' | 'RETURN' | 'THROW' | 'IMPORT' | 'EXPORT'
+type Effect = `${Operation | 'SYMBOL'}_${'ADDED' | 'REMOVED'}` |
+  'SIGNATURE_CHANGED' | 'CALL_ARGUMENT_CHANGED' | 'CONDITION_CHANGED' | 'RETURN_CHANGED' | 'UNKNOWN_SEMANTIC_CHANGE'
+
+export interface SemanticChange {
+  symbol: string
+  effect: Effect
+  before?: string
+  after?: string
+  callee?: string
+  arguments?: string[]
+}
+
+interface Fact {
+  kind: Operation
+  context: string
+  key: string
+  text: string
+  callee?: string
+  args?: string[]
+  anchor?: string
+}
+
+const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed })
+
+// Structural children omit comments and punctuation while retaining operators and literal values.
+function fingerprint(node: ts.Node, excluded?: Set<ts.Node>): string {
+  if (excluded?.has(node)) return ''
+  const children: string[] = []
+  ts.forEachChild(node, child => {
+    const key = fingerprint(child, excluded)
+    if (key) children.push(key)
+  })
+  if (children.length) return node.kind + '(' + children.map(key => key.length + ':' + key).join('') + ')'
+  if (ts.isIdentifier(node) || ts.isLiteralExpression(node) || ts.isPrivateIdentifier(node)) {
+    return JSON.stringify([node.kind, node.text])
+  }
+  return String(node.kind)
+}
+
+function summarize(root: ts.Node, excluded: Set<ts.Node>) {
+  const source = root.getSourceFile()
+  const print = (node: ts.Node) => printer.printNode(ts.EmitHint.Unspecified, node, source)
+  const facts: Fact[] = []
+  let signature: string | undefined
+  let signatureKey: string | undefined
+  const fn = ts.isVariableDeclaration(root) ? root.initializer : root
+  if (fn && (ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn) || ts.isMethodSignature(fn) ||
+      ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) {
+    const parts = [
+      ...(ts.getModifiers(fn) ?? []).filter(m => ![ts.SyntaxKind.ExportKeyword, ts.SyntaxKind.DefaultKeyword].includes(m.kind)).map(print),
+      'asteriskToken' in fn && fn.asteriskToken ? '*' : '', fn.questionToken ? '?' : '',
+      fn.typeParameters && '<' + fn.typeParameters.map(print).join(', ') + '>',
+      '(' + fn.parameters.map(print).join(', ') + ')', fn.type && ': ' + print(fn.type),
+    ]
+    signature = parts.filter(Boolean).join('')
+    const ignored = new Set<ts.Node>((ts.getModifiers(fn) ?? []).filter(m =>
+      m.kind === ts.SyntaxKind.ExportKeyword || m.kind === ts.SyntaxKind.DefaultKeyword))
+    if ('body' in fn && fn.body) ignored.add(fn.body)
+    signatureKey = fingerprint(fn, ignored)
+  }
+
+  function visit(node: ts.Node, context: string) {
+    if (excluded.has(node) || (ts.isFunctionLike(node) && node !== root && node !== fn)) return
+    const record = (kind: Operation, value: ts.Node | undefined, extra = '') =>
+      facts.push({ kind, context: context + extra, key: value ? fingerprint(value) : '', text: value ? print(value) : '' })
+    if (ts.isCallExpression(node)) {
+      facts.push({ kind: 'CALL', context, key: fingerprint(node), text: print(node),
+        callee: print(node.expression), args: node.arguments.map(print) })
+    } else if (ts.isReturnStatement(node)) record('RETURN', node.expression)
+    else if (ts.isThrowStatement(node)) record('THROW', node.expression)
+    else if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node)) record('IMPORT', node)
+    else if (ts.isExportDeclaration(node) || ts.isExportAssignment(node)) record('EXPORT', node)
+    else if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
+      const predicate = ts.isIfStatement(node) ? node.expression : node.condition
+      const thenNode = ts.isIfStatement(node) ? node.thenStatement : node.whenTrue
+      const elseNode = ts.isIfStatement(node) ? node.elseStatement : node.whenFalse
+      // Compare predicates within the same control construct. Child operations keep their arm.
+      const anchor = fingerprint(thenNode) + ':' + (elseNode ? fingerprint(elseNode) : '')
+      facts.push({ kind: 'CONDITION', context: context + '/' + node.kind,
+        key: fingerprint(predicate), text: print(predicate), anchor })
+      const arm = (body: ts.Node, label: string) => {
+        const branchContext = context + '/' + node.kind + '/' + label
+        facts.push({ kind: 'BRANCH', context: branchContext, key: fingerprint(predicate), text: print(predicate) })
+        visit(body, branchContext)
+      }
+      visit(predicate, context + '/predicate')
+      arm(thenNode, 'then')
+      if (elseNode) arm(elseNode, 'else')
+      return
+    }
+    ts.forEachChild(node, child => visit(child, context))
+  }
+  visit(root, '')
+  return { facts, signature, signatureKey, shape: fingerprint(root, excluded) }
+}
+
+function compareFacts(symbol: string, oldFacts: Fact[], newFacts: Fact[]): SemanticChange[] {
+  const changes: SemanticChange[] = []
+  const groups = new Map<string, { old: Fact[]; next: Fact[] }>()
+  for (const [side, facts] of [['old', oldFacts], ['next', newFacts]] as const) {
+    for (const fact of facts) {
+      const key = JSON.stringify([fact.kind, fact.context, fact.callee])
+      const group = groups.get(key) ?? { old: [], next: [] }
+      group[side].push(fact)
+      groups.set(key, group)
+    }
+  }
+  for (const { old, next } of groups.values()) {
+    const removed = old.filter(fact => {
+      const match = next.findIndex(candidate => candidate.key === fact.key)
+      if (match < 0) return true
+      next.splice(match, 1)
+      return false
+    })
+    if (removed.length && next.length) {
+      const [a] = removed
+      const [b] = next
+      if (a.kind === 'BRANCH' && old.length === 1 && next.length === 1) continue // same arm, edited predicate
+      const effect = { CALL: 'CALL_ARGUMENT_CHANGED', CONDITION: 'CONDITION_CHANGED', RETURN: 'RETURN_CHANGED' } as const
+      if (old.length === 1 && next.length === 1 && a.kind in effect && a.anchor === b.anchor &&
+          (a.kind !== 'CALL' || JSON.stringify(a.args) !== JSON.stringify(b.args))) {
+        changes.push({ symbol, effect: effect[a.kind as keyof typeof effect], before: a.text, after: b.text,
+          ...(a.callee ? { callee: a.callee } : {}) })
+        continue
+      }
+      if (!['IMPORT', 'EXPORT', 'THROW'].includes(a.kind)) {
+        changes.push({ symbol, effect: 'UNKNOWN_SEMANTIC_CHANGE', before: removed.map(f => f.text).join('\n'), after: next.map(f => f.text).join('\n') })
+        continue
+      }
+    }
+    for (const [direction, facts] of [['REMOVED', removed], ['ADDED', next]] as const) {
+      for (const f of facts) changes.push({ symbol, effect: `${f.kind}_${direction}`,
+        [direction === 'REMOVED' ? 'before' : 'after']: f.text,
+        ...(f.callee ? { callee: f.callee, arguments: f.args } : {}) })
+    }
+  }
+  return changes
+}
+
+function snapshot(file: string, text: string | null) {
+  const result = parseSymbols(file, text ?? '')
+  const byId = new Map((text === null ? [] : result.symbols).map(s => [s.id, s]))
+  const children = new Map<string, Set<ts.Node>>()
+  for (const s of byId.values()) {
+    if (!s.parentSymbolId) continue
+    const group = children.get(s.parentSymbolId) ?? new Set()
+    group.add(result.nodes.get(s.id)!)
+    children.set(s.parentSymbolId, group)
+  }
+  return { ...result, byId, summary: (id: string) => summarize(result.nodes.get(id)!, children.get(id) ?? new Set()) }
+}
+
+export function diffSource(file: string, before: string | null, after: string | null): SemanticChange[] {
+  const old = snapshot(file, before)
+  const next = snapshot(file, after)
+  if (old.gaps.length || next.gaps.length) {
+    return [{ symbol: encodeURIComponent(file).replace(/%2F/g, '/') + '::module', effect: 'UNKNOWN_SEMANTIC_CHANGE',
+      before: old.gaps.map(g => g.reason).join(', '), after: next.gaps.map(g => g.reason).join(', ') }]
+  }
+  const changes: SemanticChange[] = []
+  for (const id of [...new Set([...old.byId.keys(), ...next.byId.keys()])].sort()) {
+    const a = old.byId.get(id)
+    const b = next.byId.get(id)
+    if (!a || !b) changes.push({ symbol: id, effect: a ? 'SYMBOL_REMOVED' : 'SYMBOL_ADDED' })
+    if (Boolean(a?.exported) !== Boolean(b?.exported)) changes.push({ symbol: id, effect: b?.exported ? 'EXPORT_ADDED' : 'EXPORT_REMOVED' })
+    if (!a || !b) continue
+    const x = old.summary(id)
+    const y = next.summary(id)
+    const events = compareFacts(id, x.facts, y.facts)
+    if (x.signatureKey !== y.signatureKey) events.push({ symbol: id, effect: 'SIGNATURE_CHANGED', before: x.signature, after: y.signature })
+    if (!events.length && x.shape !== y.shape) events.push({ symbol: id, effect: 'UNKNOWN_SEMANTIC_CHANGE' })
+    changes.push(...events)
+  }
+  return changes
+}

@@ -19,12 +19,18 @@ interface Gap {
 }
 
 export function extractSymbols(file: string, text: string): { symbols: CodeSymbol[]; gaps: Gap[] } {
+  const { symbols, gaps } = parseSymbols(file, text)
+  return { symbols, gaps }
+}
+
+export function parseSymbols(file: string, text: string) {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
+  const nodes = new Map<string, ts.Node>()
   const symbols: CodeSymbol[] = []
   const gaps: Gap[] = []
   if (!/\.(?:[cm]?[jt]s|[jt]sx)$/i.test(file)) {
-    return { symbols, gaps: [{ line: 1, reason: 'Unsupported file extension' }] }
+    return { source, nodes, symbols, gaps: [{ line: 1, reason: 'Unsupported file extension' }] }
   }
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
   const options = { allowJs: true, noLib: true, noResolve: true, jsx: ts.JsxEmit.Preserve }
   const host = ts.createCompilerHost(options)
   host.getSourceFile = (name) => name === file ? source : undefined
@@ -33,9 +39,10 @@ export function extractSymbols(file: string, text: string): { symbols: CodeSymbo
   for (const diagnostic of program.getSyntacticDiagnostics(source)) {
     gaps.push({ line: line(diagnostic.start ?? 0), reason: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n') })
   }
-  if (gaps.length) return { symbols, gaps }
+  if (gaps.length) return { source, nodes, symbols, gaps }
 
   const moduleId = encodeURIComponent(file).replace(/%2F/g, '/') + '::module'
+  nodes.set(moduleId, source)
   symbols.push({ id: moduleId, file, name: file, kind: 'module', startLine: 1, endLine: line(text.length), exported: false })
   const exports = new Set<string>()
   for (const statement of source.statements) {
@@ -56,6 +63,7 @@ export function extractSymbols(file: string, text: string): { symbols: CodeSymbo
       gaps.push({ line: line(node.getStart(source)), reason: 'Ambiguous declaration: ' + id })
     }
     seen.add(id)
+    nodes.set(id, node)
     symbols.push({ id, name, kind, file, parentSymbolId: parent, exported,
       startLine: line(node.getStart(source)), endLine: line(Math.max(node.getStart(source), node.end - 1)) })
     return id
@@ -98,5 +106,5 @@ export function extractSymbols(file: string, text: string): { symbols: CodeSymbo
       gaps.push({ line: line(statement.getStart()), reason: 'Unsupported declaration kind' })
     }
   }
-  return { symbols: symbols.filter((s) => !ambiguous.has(s.id) && !ambiguous.has(s.parentSymbolId ?? '')), gaps }
+  return { source, nodes, symbols: symbols.filter((s) => !ambiguous.has(s.id) && !ambiguous.has(s.parentSymbolId ?? '')), gaps }
 }
