@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-type SymbolKind = 'module' | 'function' | 'method' | 'class' | 'interface' | 'type' | 'variable'
+type SymbolKind = 'module' | 'function' | 'method' | 'getter' | 'setter' | 'class' | 'interface' | 'type' | 'variable'
 
 export interface CodeSymbol {
   id: string
@@ -97,13 +97,14 @@ export function indexSource(file: string, source: ts.SourceFile, diagnostics: re
       const parent = add(statement, name, kind, moduleId, exported || exports.has(name))
       if (ts.isClassDeclaration(statement) || ts.isInterfaceDeclaration(statement)) {
         for (const member of statement.members) {
-          if (!ts.isMethodDeclaration(member) && !ts.isMethodSignature(member)) continue
+          if (!ts.isMethodDeclaration(member) && !ts.isMethodSignature(member) && !ts.isAccessor(member)) continue
           if (!ts.isIdentifier(member.name) && !ts.isPrivateIdentifier(member.name) && !ts.isStringLiteral(member.name)) {
             gaps.push({ line: line(member.getStart()), reason: 'Computed or unsupported method name' })
             continue
           }
           const isStatic = ts.getModifiers(member)?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)
-          add(member, member.name.text, 'method', parent, false, isStatic ? 'static:' : '')
+          const kind = ts.isGetAccessorDeclaration(member) ? 'getter' : ts.isSetAccessorDeclaration(member) ? 'setter' : 'method'
+          add(member, member.name.text, kind, parent, false, isStatic ? 'static:' : '')
         }
       }
     } else if (ts.isEnumDeclaration(statement) || ts.isModuleDeclaration(statement)) {

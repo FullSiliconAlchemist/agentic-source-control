@@ -12,8 +12,16 @@ const instructions = [
 
 function sentencesFor(area: Area) {
   const facts = new Set<string>()
-  for (const { symbol, effect, callee } of area.semanticEffects) {
-    if (callee && (effect === 'CALL_ADDED' || effect === 'CALL_REMOVED')) {
+  for (const { symbol, effect, callee, before, after } of area.semanticEffects) {
+    if (callee && (effect === 'CONSTRUCTION_ADDED' || effect === 'CONSTRUCTION_REMOVED')) {
+      facts.add(`The change ${effect === 'CONSTRUCTION_ADDED' ? 'adds' : 'removes'} construction of ${callee} in ${symbol}.`)
+    } else if ((effect === 'IMPORT_ADDED' || effect === 'IMPORT_REMOVED') && (after || before)) {
+      facts.add(`In ${symbol}, the change ${effect === 'IMPORT_ADDED' ? 'adds' : 'removes'} ${after || before}`)
+    } else if (effect === 'CALL_ADDED' && after && after.length <= 140) {
+      facts.add(`The change adds ${after} in ${symbol}.`)
+    } else if (effect === 'SIGNATURE_CHANGED' && before && after && before.length + after.length <= 200) {
+      facts.add(`The signature of ${symbol} changes from ${before} to ${after}.`)
+    } else if (callee && (effect === 'CALL_ADDED' || effect === 'CALL_REMOVED')) {
       facts.add(`The change ${effect === 'CALL_REMOVED' ? 'removes' : 'adds'} a call to ${callee} in ${symbol}.`)
     } else if (effect === 'UNKNOWN_SEMANTIC_CHANGE') {
       facts.add(`The analyzer could not classify the change in ${symbol}.`)
