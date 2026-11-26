@@ -8,7 +8,7 @@ function radius(symbol: string, direct: number, transitive: number, files: numbe
     affectedFiles: ids('file', files), depth: transitive ? 2 : direct ? 1 : 0 }
 }
 
-it.only('explains the complete score with raw counts, weights and awarded points', () => {
+it('explains the complete score with raw counts, weights and awarded points', () => {
   const symbol = 'printClass'
   const [score] = rankStructuralChanges([{ symbol, effect: 'BRANCH_ADDED' }], [radius(symbol, 3, 24, 12)])
   expect(score).toEqual({ symbol, structuralScore: 47, scoreReasons: [

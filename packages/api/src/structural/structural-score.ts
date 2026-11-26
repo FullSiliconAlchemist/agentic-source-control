@@ -40,18 +40,22 @@ export function rankStructuralChanges(changes: readonly SemanticChange[], radii:
     const events = counts.get(symbol)!
     const radius = radiusBySymbol.get(symbol)
     if (!radius) throw new Error('Missing blast radius for ' + symbol)
-    const scoreReasons: ScoreReason[] = []
-    for (const effect of [...events.keys()].sort()) {
-      const count = events.get(effect)!
-      const weight = eventWeights[effect]
-      scoreReasons.push({ factor: effect, count, weight, points: count * weight })
-    }
-    for (const rule of radiusWeights) {
-      const count = radius[rule.factor].length
-      scoreReasons.push({ ...rule, count, points: Math.min(count * rule.weight, rule.cap) })
-    }
-    return { symbol, structuralScore: scoreReasons.reduce((sum, reason) => sum + reason.points, 0), scoreReasons }
+    return { symbol, ...scoreImpact(events, radius) }
   })
   // Stable sort preserves symbol ID order for equal scores.
   return scores.sort((a, b) => b.structuralScore - a.structuralScore)
+}
+
+export function scoreImpact(events: ReadonlyMap<Effect, number>, radius: Omit<BlastRadius, 'symbol'>) {
+  const scoreReasons: ScoreReason[] = []
+  for (const effect of [...events.keys()].sort()) {
+    const count = events.get(effect)!
+    const weight = eventWeights[effect]
+    scoreReasons.push({ factor: effect, count, weight, points: count * weight })
+  }
+  for (const rule of radiusWeights) {
+    const count = radius[rule.factor].length
+    scoreReasons.push({ ...rule, count, points: Math.min(count * rule.weight, rule.cap) })
+  }
+  return { structuralScore: scoreReasons.reduce((sum, reason) => sum + reason.points, 0), scoreReasons }
 }

@@ -2,7 +2,7 @@ import type { SymbolEdge } from './dependency-graph'
 import type { SemanticChange } from './semantic-diff'
 import type { CodeSymbol } from './symbols'
 
-interface RevisionGraph {
+export interface RevisionGraph {
   symbols: ReadonlyArray<Pick<CodeSymbol, 'id' | 'file'>>
   graphEdges: readonly SymbolEdge[]
 }
@@ -28,9 +28,9 @@ function indexRevision(graph: RevisionGraph) {
   return { files, incoming }
 }
 
-function distancesFrom(symbol: string, incoming: Map<string, Set<string>>, maxDepth: number) {
-  const distances = new Map([[symbol, 0]])
-  const queue = [symbol]
+function distancesFrom(roots: string[], incoming: Map<string, Set<string>>, maxDepth: number) {
+  const distances = new Map(roots.map(id => [id, 0]))
+  const queue = [...roots]
   for (let i = 0; i < queue.length; i++) {
     const current = queue[i]
     const depth = distances.get(current)!
@@ -41,23 +41,28 @@ function distancesFrom(symbol: string, incoming: Map<string, Set<string>>, maxDe
       queue.push(dependent)
     }
   }
-  distances.delete(symbol)
+  for (const root of roots) distances.delete(root)
   return distances
 }
 
 export function calculateBlastRadii(
   changes: readonly SemanticChange[], before: RevisionGraph, after: RevisionGraph, maxDepth = 5,
 ): BlastRadius[] {
+  const measure = createBlastRadiusCalculator(before, after, maxDepth)
+  const changedSymbols = [...new Set(changes.map(change => change.symbol))].sort()
+  return changedSymbols.map(symbol => ({ symbol, ...measure([symbol]) }))
+}
+
+export function createBlastRadiusCalculator(before: RevisionGraph, after: RevisionGraph, maxDepth = 5) {
   if (!Number.isSafeInteger(maxDepth) || maxDepth < 0) throw new RangeError('maxDepth must be a nonnegative integer')
   const revisions = [indexRevision(before), indexRevision(after)]
-  const changedSymbols = [...new Set(changes.map(change => change.symbol))].sort()
-  return changedSymbols.map(symbol => {
+  return (symbols: string[]): Omit<BlastRadius, 'symbol'> => {
     const distances = new Map<string, number>()
     const files = new Set<string>()
     for (const revision of revisions) {
-      if (!revision.files.has(symbol)) continue
+      const roots = symbols.filter(id => revision.files.has(id))
       // Walk one revision at a time so paths cannot cross between snapshots.
-      for (const [id, distance] of distancesFrom(symbol, revision.incoming, maxDepth)) {
+      for (const [id, distance] of distancesFrom(roots, revision.incoming, maxDepth)) {
         distances.set(id, Math.min(distances.get(id) ?? Infinity, distance))
         files.add(revision.files.get(id)!)
       }
@@ -70,7 +75,7 @@ export function calculateBlastRadii(
       else transitiveDependents.push(id)
       depth = Math.max(depth, distance)
     }
-    return { symbol, directDependents: directDependents.sort(), transitiveDependents: transitiveDependents.sort(),
+    return { directDependents: directDependents.sort(), transitiveDependents: transitiveDependents.sort(),
       affectedFiles: [...files].sort(), depth }
-  })
+  }
 }
