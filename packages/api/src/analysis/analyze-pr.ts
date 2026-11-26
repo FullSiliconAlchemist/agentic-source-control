@@ -9,8 +9,8 @@ import { renderReview, reviewRevisions } from '../structural/review'
 export async function runReview(args: string[]) {
   const flags = args.filter(arg => arg.startsWith('--'))
   const values = args.filter(arg => !arg.startsWith('--'))
-  const usage = 'Usage: assure review <GitHub PR URL | owner/repo number | base head> [--deterministic] [--json] [--allow-private]'
-  if (flags.some(flag => !['--deterministic', '--json', '--allow-private'].includes(flag))) throw new Error(usage)
+  const usage = 'Usage: assure review <GitHub PR URL | owner/repo number | base head> [--deterministic] [--explain] [--json] [--allow-private]'
+  if (flags.some(flag => !['--deterministic', '--explain', '--json', '--allow-private'].includes(flag))) throw new Error(usage)
   const url = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/.exec(values[0] ?? '')
   let repository: string | undefined
   let number = 0
@@ -42,6 +42,19 @@ export async function runReview(args: string[]) {
   } else {
     const dir = process.env.INIT_CWD || process.cwd()
     report = reviewRevisions(dir, resolveCommit(dir, values[0]), resolveCommit(dir, values[1]))
+  }
+  if (flags.includes('--explain') && !flags.includes('--deterministic') && report.changeAreas.length) {
+    try {
+      const { loadAnalysisConfig } = await import('./local-config')
+      const { explainAreas } = await import('../structural/explain-review')
+      const explanations = await explainAreas(report.changeAreas, loadAnalysisConfig().model)
+      if (flags.includes('--json')) return JSON.stringify({ ...report, explanations })
+      return renderReview(report) + '\n\nREVIEWER NOTES\n' +
+        explanations.map((note, i) => (i + 1) + '. ' + note.text).join('\n')
+    } catch (error) {
+      const detail = error instanceof Error ? error.name + ': ' + error.message : 'Unknown error'
+      console.error('Bedrock explanations unavailable. ' + detail + '\nShowing the deterministic review.')
+    }
   }
   return flags.includes('--json') ? JSON.stringify(report) : renderReview(report)
 }

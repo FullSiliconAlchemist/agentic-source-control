@@ -23,9 +23,9 @@ it('reviews pinned commits through both CLI entry points without loading a model
     git('checkout', '--detach', '-q', mergeBase)
     writeFileSync(join(dir, 'upstream.js'), 'export const upstream = 1')
     const base = commit('base branch advanced')
-    const run = (entry: string[], args: string[]) => execFileSync(process.execPath, [
+    const run = (entry: string[], args: string[], renderer = '') => execFileSync(process.execPath, [
       '-r', join(api, 'src/analysis/fixtures/mock-analysis-services.cjs'), ...entry, ...args,
-    ], { cwd: api, encoding: 'utf8', env: { ...process.env, INIT_CWD: dir, GITHUB_TOKEN: '',
+    ], { cwd: api, encoding: 'utf8', env: { ...process.env, INIT_CWD: dir, GITHUB_TOKEN: '', MOCK_RENDERER: renderer,
       REVIEW_FIXTURE: JSON.stringify({ base, head, mergeBase }), GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'url.' + dir + '.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/fixture/project.git' } })
     const assure = ['bin/assure.cjs', 'review']
@@ -39,6 +39,14 @@ it('reviews pinned commits through both CLI entry points without loading a model
     expect(report.changeAreas[0]).toMatchObject({ semanticEffects: expect.arrayContaining([
       expect.objectContaining({ effect: 'CALL_REMOVED', callee: 'sanitize' }),
     ]), blastRadius: { directDependents: ['code.js::function:caller'] } })
+    expect(run(assure, [url, '--explain', '--deterministic', '--json'])).toBe(json)
+    for (const mode of ['failed', 'invalid']) {
+      expect(run(assure, [url, '--explain', '--json'], mode)).toBe(json)
+    }
+    const { explanations, ...canonical } = JSON.parse(run(assure, [url, '--explain', '--json'], 'success'))
+    expect(canonical).toEqual(report)
+    expect(explanations).toEqual([{ areaId: report.changeAreas[0].id,
+      text: 'The change removes a call to sanitize in code.js::function:evaluate.' }])
     const local = run(assure, [mergeBase, head, '--deterministic'])
     expect(local).toContain('PR STRUCTURAL REVIEW')
     expect(local).toContain('CALL_REMOVED')

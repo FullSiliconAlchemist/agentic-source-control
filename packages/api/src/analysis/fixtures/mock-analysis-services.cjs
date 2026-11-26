@@ -12,6 +12,17 @@ global.fetch = async url => {
 const Module = require('node:module')
 const original = Module._load
 Module._load = function (name, ...args) {
-  if (name.includes('bedrock') || name.includes('/llm/')) throw new Error('Unexpected model import')
+  if (name === '../llm/bedrock' && process.env.MOCK_RENDERER) {
+    return { createBedrockModel: () => ({ async generateJson(instructions, evidence) {
+      if (!instructions.includes('Explain only the supplied facts. Do not infer behavior that is not represented in the structured input.')) {
+        throw new Error('Missing grounding instruction')
+      }
+      if (process.env.MOCK_RENDERER === 'failed') throw new Error('Bedrock unavailable')
+      const notes = Object.fromEntries(evidence.map(area => [area.label, 0]))
+      if (process.env.MOCK_RENDERER === 'invalid') notes[evidence[0].label] = -1
+      return JSON.stringify(notes)
+    } }) }
+  }
+  if (name.includes('bedrock') || name.includes('/llm/')) process.exit(91)
   return original.call(this, name, ...args)
 }
