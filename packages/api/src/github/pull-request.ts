@@ -47,18 +47,18 @@ interface FetchPullRequestOptions {
 const PAGE_SIZE = 100
 const MAX_FILES = 3_000
 
-export async function fetchPullRequest(
+function githubRequest(
   repository: string,
   number: number,
   options: FetchPullRequestOptions = {},
-): Promise<PullRequest> {
+) {
   if (!/^[a-z\d-]+\/(?!\.{1,2}$)[a-z\d._-]+$/i.test(repository) ||
       !Number.isSafeInteger(number) || number < 1) {
     throw new Error('Expected a GitHub repository in owner/repo format and a positive PR number.')
   }
 
   const fetch = options.fetch ?? globalThis.fetch
-  const endpoint = `https://api.github.com/repos/${repository}/pulls/${number}`
+  const endpoint = `https://api.github.com/repos/${repository}`
   const headers = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2026-03-10',
@@ -83,15 +83,39 @@ export async function fetchPullRequest(
     }
   }
 
-  const pr = await get<GitHubPullRequest>('', 'PR metadata')
+  return get
+}
+
+async function metadata(get: ReturnType<typeof githubRequest>, number: number, options: FetchPullRequestOptions) {
+  const pr = await get<GitHubPullRequest>(`/pulls/${number}`, 'PR metadata')
   if (pr.base.repo.private !== false && !options.allowPrivate) {
     throw new Error('This repository requires explicit opt-in to fetch its PR files. Use --allow-private.')
   }
 
+  return pr
+}
+
+export async function fetchComparison(repository: string, number: number, options: FetchPullRequestOptions = {}) {
+  const get = githubRequest(repository, number, options)
+  const pr = await metadata(get, number, options)
+  const base = pr.base.sha
+  const head = pr.head.sha
+  const sha = /^[0-9a-f]{40}$/
+  if (!sha.test(base) || !sha.test(head)) throw new Error('GitHub returned an invalid revision.')
+  const comparison = await get<{ merge_base_commit: { sha: string } }>(
+    `/compare/${base}...${head}?per_page=1`, 'merge base')
+  const mergeBase = comparison.merge_base_commit?.sha
+  if (!sha.test(mergeBase)) throw new Error('GitHub returned an invalid merge base.')
+  return { base, head, mergeBase }
+}
+
+export async function fetchPullRequest(repository: string, number: number, options: FetchPullRequestOptions = {}): Promise<PullRequest> {
+  const get = githubRequest(repository, number, options)
+  const pr = await metadata(get, number, options)
   const files: ChangedFile[] = []
   const pages = Math.ceil(Math.min(pr.changed_files, MAX_FILES) / PAGE_SIZE)
   for (let page = 1; page <= pages; page++) {
-    const batch = await get<GitHubChangedFile[]>(`/files?per_page=${PAGE_SIZE}&page=${page}`, `PR files page ${page}`)
+    const batch = await get<GitHubChangedFile[]>(`/pulls/${number}/files?per_page=${PAGE_SIZE}&page=${page}`, `PR files page ${page}`)
     files.push(...batch.map((file) => ({
       path: file.filename,
       ...(file.previous_filename ? { previousPath: file.previous_filename } : {}),

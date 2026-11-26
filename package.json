@@ -2,7 +2,9 @@
   "name": "quickstart-template",
   "version": "1.0.0",
   "private": true,
+  "bin": { "assure": "packages/api/bin/assure.cjs" },
   "scripts": {
+    "assure": "node packages/api/bin/assure.cjs",
     "acceptance:report": "pnpm --filter @quickstart-template/api acceptance:report",
     "analyze-pr": "pnpm --filter @quickstart-template/api analyze-pr",
     "fetch-pr": "pnpm --filter @quickstart-template/api fetch-pr",
