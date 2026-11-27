@@ -23,15 +23,17 @@ it('reviews pinned commits through both CLI entry points without loading a model
     git('checkout', '--detach', '-q', mergeBase)
     writeFileSync(join(dir, 'upstream.js'), 'export const upstream = 1')
     const base = commit('base branch advanced')
-    const run = (entry: string[], args: string[], renderer = '') => execFileSync(process.execPath, [
+    const run = (entry: string[], args: string[], renderer = '', host = 'github.com') => execFileSync(process.execPath, [
       '-r', join(api, 'src/analysis/fixtures/mock-analysis-services.cjs'), ...entry, ...args,
-    ], { cwd: api, encoding: 'utf8', env: { ...process.env, INIT_CWD: dir, GITHUB_TOKEN: '', MOCK_RENDERER: renderer,
+    ], { cwd: api, encoding: 'utf8', env: { ...process.env, INIT_CWD: dir, GITHUB_TOKEN: '', GH_HOST: host, GH_ENTERPRISE_TOKEN: 'fixture-token', MOCK_RENDERER: renderer,
       REVIEW_FIXTURE: JSON.stringify({ base, head, mergeBase }), GIT_CONFIG_COUNT: '1',
-      GIT_CONFIG_KEY_0: 'url.' + dir + '.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/fixture/project.git' } })
+      GIT_CONFIG_KEY_0: 'url.' + dir + '.insteadOf', GIT_CONFIG_VALUE_0: `https://${host}/fixture/project.git` } })
     const assure = ['bin/assure.cjs', 'review']
     const url = 'https://github.com/fixture/project/pull/42'
     const json = run(assure, [url, '--deterministic', '--json'])
     expect(run(['-r', '@swc-node/register', 'src/analysis/analyze-pr.ts'], ['fixture/project', '42', '--json'])).toBe(json)
+    const enterprise = 'github.example.test'
+    expect(run(assure, [`https://${enterprise}/fixture/project/pull/42/files`, '--allow-private', '--json'], '', enterprise)).toBe(json)
     const report = JSON.parse(json)
     expect(report.revisions).toEqual({ base, head, comparisonBase: mergeBase })
     expect(report.files.map((file: {path: string}) => file.path)).toEqual(['code.js', 'notes.md'])

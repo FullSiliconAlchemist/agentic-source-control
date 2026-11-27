@@ -1,3 +1,4 @@
+import { githubHost } from './host'
 import { TextDecoder } from 'node:util'
 import type { PullRequest } from './pull-request'
 
@@ -12,6 +13,7 @@ export async function fetchFileContext(
   side: 'base' | 'head',
   maxBytes: number,
   token?: string,
+  hostname?: string,
 ): Promise<FileContext> {
   const sha = side === 'base' ? pr.baseSha : pr.headSha
   const segments = path.split('/')
@@ -24,12 +26,13 @@ export async function fetchFileContext(
 
   const encodedPath = segments.map(encodeURIComponent).join('/')
   try {
+    const host = githubHost(hostname)
     const response = await fetch(
-      `https://api.github.com/repos/${pr.repository}/contents/${encodedPath}?ref=${sha}`,
+      `${host.api}/repos/${pr.repository}/contents/${encodedPath}?ref=${sha}`,
       {
         headers: {
           Accept: 'application/vnd.github.raw+json',
-          'X-GitHub-Api-Version': '2026-03-10',
+          'X-GitHub-Api-Version': host.version,
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         redirect: 'error',

@@ -1,3 +1,5 @@
+import { githubHost } from './host'
+
 interface GitHubPullRequest {
   html_url: string
   number: number
@@ -40,6 +42,7 @@ export interface PullRequest {
 
 interface FetchPullRequestOptions {
   token?: string
+  host?: string
   allowPrivate?: boolean
   fetch?: typeof globalThis.fetch
 }
@@ -58,10 +61,11 @@ function githubRequest(
   }
 
   const fetch = options.fetch ?? globalThis.fetch
-  const endpoint = `https://api.github.com/repos/${repository}`
+  const host = githubHost(options.host)
+  const endpoint = `${host.api}/repos/${repository}`
   const headers = {
     Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2026-03-10',
+    'X-GitHub-Api-Version': host.version,
     ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
   }
   const signal = AbortSignal.timeout(20_000)

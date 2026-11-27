@@ -1,10 +1,14 @@
 // The integration test maps GitHub's Git remote to a local fixture repository.
 const fixture = JSON.parse(process.env.REVIEW_FIXTURE)
-global.fetch = async url => {
-  if (url === 'https://api.github.com/repos/fixture/project/pulls/42') {
-    return Response.json({ base: { sha: fixture.base, repo: { private: false } }, head: { sha: fixture.head } })
+const enterprise = process.env.GH_HOST === 'github.example.test'
+const api = enterprise ? 'https://github.example.test/api/v3' : 'https://api.github.com'
+global.fetch = async (url, options) => {
+  if (enterprise && (options.headers.Authorization !== 'Bearer fixture-token' ||
+      options.headers['X-GitHub-Api-Version'] !== '2022-11-28')) throw new Error('Incorrect enterprise headers')
+  if (url === `${api}/repos/fixture/project/pulls/42`) {
+    return Response.json({ base: { sha: fixture.base, repo: { private: enterprise } }, head: { sha: fixture.head } })
   }
-  if (url === `https://api.github.com/repos/fixture/project/compare/${fixture.base}...${fixture.head}?per_page=1`) {
+  if (url === `${api}/repos/fixture/project/compare/${fixture.base}...${fixture.head}?per_page=1`) {
     return Response.json({ merge_base_commit: { sha: fixture.mergeBase } })
   }
   throw new Error('Unexpected HTTP request: ' + url)
